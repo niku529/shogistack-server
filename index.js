@@ -96,14 +96,29 @@ io.on("connection", (socket) => {
     io.in(roomId).emit("rematch_status", room.rematchRequests);
   });
 
-  socket.on("send_message", ({ roomId, message, role, userName }) => {
+  // ★修正: userId もメッセージ情報に含めて送信
+  socket.on("send_message", ({ roomId, message, role, userName, userId }) => {
     let senderName = userName;
-    if (!senderName) {
+    let senderId = userId;
+
+    // 念のためサーバー情報でも補完
+    if (!senderName || !senderId) {
         const sender = socketUserMap.get(socket.id);
-        senderName = sender ? sender.userName : "不明";
+        if (sender) {
+            if (!senderName) senderName = sender.userName;
+            if (!senderId) senderId = sender.userId;
+        } else {
+            senderName = senderName || "不明";
+        }
     }
+    
     io.in(roomId).emit("receive_message", { 
-        id: generateId(), text: message, role, userName: senderName, timestamp: Date.now() 
+        id: generateId(), 
+        text: message, 
+        role, 
+        userName: senderName, 
+        userId: senderId, // ★重要: これで本人判定を行う
+        timestamp: Date.now() 
     });
   });
 
@@ -294,7 +309,7 @@ io.on("connection", (socket) => {
            stopTimer(room);
            room.status = 'finished';
            
-           // 千日手判定ロジック (省略なし)
+           // 千日手判定ロジック
            let indices = [];
            let tempBoard = createInitialBoard();
            let tempHands = { sente: { ...EMPTY_HAND }, gote: { ...EMPTY_HAND } };
