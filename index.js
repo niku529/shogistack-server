@@ -3,13 +3,12 @@ const { createInitialBoard, isValidMove, applyMove, generateSFEN, isKingInCheck,
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
-// ★修正1: pingTimeout を延ばして通信断絶に強くする
 const io = new Server(3001, {
   cors: { 
     origin: "*", 
     methods: ["GET", "POST"] 
   },
-  pingTimeout: 60000, // 60秒間応答がなくても切断しない（デフォルトは20秒）
+  pingTimeout: 60000, 
   pingInterval: 25000
 });
 
@@ -22,8 +21,23 @@ const stopTimer = (room) => {
   if (room.timerInterval) { clearInterval(room.timerInterval); room.timerInterval = null; }
 };
 
+// ★追加: 人数更新用の関数
+const broadcastUserCounts = (roomId) => {
+    // 全体の接続数
+    const globalCount = io.engine.clientsCount;
+    io.emit("update_global_count", globalCount);
+
+    // その部屋の人数
+    if (roomId) {
+        const roomCount = io.sockets.adapter.rooms.get(roomId)?.size || 0;
+        io.in(roomId).emit("update_room_count", roomCount);
+    }
+};
+
 io.on("connection", (socket) => {
   console.log("接続:", socket.id);
+  // 接続した時点で全体人数は増えるので通知
+  io.emit("update_global_count", io.engine.clientsCount);
 
   socket.on("join_room", ({ roomId, mode, userId, userName }) => {
     socket.join(roomId);
@@ -96,6 +110,9 @@ io.on("connection", (socket) => {
     io.in(roomId).emit("player_names_updated", room.playerNames);
     io.in(roomId).emit("ready_status", room.ready);
     io.in(roomId).emit("rematch_status", room.rematchRequests);
+
+    // ★追加: 人数更新を通知
+    broadcastUserCounts(roomId);
   });
 
   socket.on("send_message", ({ roomId, message, role, userName, userId }) => {
@@ -244,8 +261,6 @@ io.on("connection", (socket) => {
       if (room.times[turn] > 0) room.times[turn]--;
       else room.currentByoyomi[turn]--;
 
-      // ★修正2: 秒読み切れ判定を緩和 (0になってからさらに3秒待つ)
-      // これにより、通信ラグで負けるのを防ぐ
       if (room.times[turn] === 0 && room.currentByoyomi[turn] <= -1) {
         stopTimer(room);
         room.status = 'finished';
@@ -253,7 +268,6 @@ io.on("connection", (socket) => {
         io.in(roomId).emit("game_finished", { winner: room.winner, reason: 'timeout' });
       }
       
-      // ★修正3: クライアントには0未満の値を送らない (表示が崩れるのを防ぐ)
       const displayTimes = { ...room.times };
       const displayByoyomi = {
           sente: Math.max(0, room.currentByoyomi.sente),
@@ -308,7 +322,6 @@ io.on("connection", (socket) => {
         const isCheck = isKingInCheck(room.board, nextTurn);
         const moveWithInfo = { ...move, isCheck, time: { now: spentSeconds, total: room.totalConsumedTimes[currentTurn] } };
         
-        // ★修正4: 手を指したら秒読みをリセット (ここでマイナスになっていた値も元に戻る)
         room.currentByoyomi[currentTurn] = room.settings.byoyomi;
         
         room.history.push(moveWithInfo);
@@ -320,7 +333,6 @@ io.on("connection", (socket) => {
            stopTimer(room);
            room.status = 'finished';
            
-           // 千日手判定ロジック
            let indices = [];
            let tempBoard = createInitialBoard();
            let tempHands = { sente: { ...EMPTY_HAND }, gote: { ...EMPTY_HAND } };
@@ -448,6 +460,10 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     if (socketUserMap.has(socket.id)) {
       const { roomId, userName, role } = socketUserMap.get(socket.id);
+      
+      socketUserMap.delete(socket.id); // ★修正: 先に削除してからカウント通知
+      broadcastUserCounts(roomId);     // ★追加: 減った人数を通知
+
       io.in(roomId).emit("receive_message", { 
         id: generateId(), text: `${userName} さんが退出しました`, role: 'system', timestamp: Date.now() 
       });
@@ -464,7 +480,6 @@ io.on("connection", (socket) => {
            }
         }
       }
-      socketUserMap.delete(socket.id);
     }
     console.log("切断:", socket.id);
   });
