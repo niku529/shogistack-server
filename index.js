@@ -37,6 +37,7 @@ const formatDuration = (seconds) => {
   return `${m}分${s}秒`;
 };
 
+
 // --- 終局処理の共通関数 ---
 const handleGameEnd = (room, roomId, winner, reason) => {
     stopTimer(room);
@@ -84,23 +85,34 @@ const handleGameEnd = (room, roomId, winner, reason) => {
         const myTimeSec = Math.floor(room.totalConsumedTimes[role] / 1000);
         const oppTimeSec = Math.floor(room.totalConsumedTimes[opponentRole] / 1000);
 
-        // 自分だけの最長思考手を取得
+        // 自分だけの最長思考手
         const myMax = role === 'sente' ? maxThinkSente : maxThinkGote;
 
-        // ★修正: 相手の最長思考手は削除し、表記を「最長思考手」に統一
+        // ★追加: 平均考慮時間の計算
+        // 自分の指した手の数（総手数が奇数か偶数かで計算が変わる）
+        let myMoveCount = 0;
+        if (role === 'sente') {
+            myMoveCount = Math.ceil(totalMoves / 2); // 先手は切り上げ (1手なら1回、2手なら1回)
+        } else {
+            myMoveCount = Math.floor(totalMoves / 2); // 後手は切り捨て (1手なら0回、2手なら1回)
+        }
+
+        const avgThinkTime = myMoveCount > 0 ? Math.floor(myTimeSec / myMoveCount) : 0;
+
         const message = `【対局結果】
 ${resultText}
 手数：${totalMoves}手
 対局時間：${formatDuration(gameDurationSec)}
-あなたの消費時間：${formatDuration(myTimeSec)}
+あなたの消費時間：${formatDuration(myTimeSec)} (平均 ${formatDuration(avgThinkTime)})
 相手の消費時間：${formatDuration(oppTimeSec)}
 最長思考手：${myMax.moveNum > 0 ? `${myMax.moveNum}手目 (${formatDuration(myMax.time)})` : '-'}`;
 
+        // ★修正: 名前を Log(bot) に変更
         io.to(socketId).emit("receive_message", {
             id: generateId(),
             text: message,
             role: 'log',
-            userName: 'ログ',
+            userName: 'Log', // ここを変更
             userId: 'system-log',
             timestamp: Date.now()
         });
@@ -109,6 +121,8 @@ ${resultText}
     sendStatsToPlayer('sente');
     sendStatsToPlayer('gote');
 };
+
+
 
 
 // --- DBヘルパー ---
