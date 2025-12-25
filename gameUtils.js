@@ -1,4 +1,4 @@
-// shogi-server/gameUtils.js
+// shogistack-server/gameUtils.js
 
 const PIECE_TYPES = {
   Pawn: 'Pawn', Lance: 'Lance', Knight: 'Knight', Silver: 'Silver',
@@ -180,8 +180,53 @@ const isKingInCheck = (board, targetTurn) => {
   return false;
 };
 
-// 妥当な手か判定 (王手放置チェック含む)
-const isValidMove = (board, hands, currentTurn, move) => {
+// ★追加: 詰み判定 (合法手があるかチェック)
+const hasLegalMoves = (board, hands, turn) => {
+  // 1. 盤上の駒
+  for (let y = 0; y < 9; y++) {
+    for (let x = 0; x < 9; x++) {
+      const p = board[y][x];
+      if (p && p.owner === turn) {
+        for (let ty = 0; ty < 9; ty++) {
+          for (let tx = 0; tx < 9; tx++) {
+            if (board[ty][tx] && board[ty][tx].owner === turn) continue;
+            if (!canPieceMoveTo(board, {x, y}, {x: tx, y: ty}, p, turn)) continue;
+
+            const move = { from: {x, y}, to: {x: tx, y: ty}, piece: p.type, drop: false, isPromoted: false };
+            if (isValidMove(board, hands, turn, move, false)) return true;
+
+            const canPromote = ['Pawn', 'Lance', 'Knight', 'Silver', 'Bishop', 'Rook'].includes(p.type);
+            if (canPromote) {
+               const isZone = (turn === 'sente' ? (y <= 2 || ty <= 2) : (y >= 6 || ty >= 6));
+               if (isZone) {
+                  if (isValidMove(board, hands, turn, { ...move, isPromoted: true }, false)) return true;
+               }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 2. 持ち駒
+  const hand = hands[turn];
+  for (const pieceType of Object.keys(hand)) {
+    if (hand[pieceType] > 0) {
+      for (let ty = 0; ty < 9; ty++) {
+        for (let tx = 0; tx < 9; tx++) {
+          if (board[ty][tx] !== null) continue;
+          const move = { from: 'hand', to: {x: tx, y: ty}, piece: pieceType, drop: true, isPromoted: false };
+          if (isValidMove(board, hands, turn, move, false)) return true;
+        }
+      }
+    }
+  }
+
+  return false;
+};
+
+// ★修正: isValidMove (checkUchiFuzume対応)
+const isValidMove = (board, hands, currentTurn, move, checkUchiFuzume = true) => {
   const { from, to, piece, drop, isPromoted } = move;
 
   if (to.x < 0 || to.x > 8 || to.y < 0 || to.y > 8) return false;
@@ -198,7 +243,6 @@ const isValidMove = (board, hands, currentTurn, move) => {
      }
   }
 
-  // --- 移動ルールの基本チェック ---
   let isMoveOk = false;
   if (drop) {
     if (targetPiece !== null) return false;
@@ -226,15 +270,27 @@ const isValidMove = (board, hands, currentTurn, move) => {
 
   if (!isMoveOk) return false;
 
-  // --- ★重要: 自殺手（王手放置）チェック ---
-  // 仮に手を指してみる
   const nextState = applyMove(board, hands, move, currentTurn);
-  // 指した後、自分の王様に王手が掛かっているなら、それは反則手
   if (isKingInCheck(nextState.board, currentTurn)) {
     return false;
   }
 
+  // ★追加: 打ち歩詰め判定
+  if (checkUchiFuzume && drop && piece === 'Pawn') {
+    const nextTurn = currentTurn === 'sente' ? 'gote' : 'sente';
+    if (isKingInCheck(nextState.board, nextTurn)) {
+      if (!hasLegalMoves(nextState.board, nextState.hands, nextTurn)) {
+        return false;
+      }
+    }
+  }
+
   return true;
+};
+
+// ★追加: 詰み判定
+const isCheckmate = (board, hands, turn) => {
+  return isKingInCheck(board, turn) && !hasLegalMoves(board, hands, turn);
 };
 
 const generateSFEN = (board, turn, hands) => {
@@ -263,5 +319,6 @@ module.exports = {
   applyMove,
   generateSFEN,
   isKingInCheck,
+  isCheckmate, // ★export
   EMPTY_HAND
 };
