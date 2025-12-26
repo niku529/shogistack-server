@@ -313,12 +313,53 @@ const generateSFEN = (board, turn, hands) => {
   return sfen;
 };
 
+// ★追加: 入玉判定ロジック（サーバー版）
+const PIECE_POINTS_VALS = {
+  Pawn: 1, Lance: 1, Knight: 1, Silver: 1, Gold: 1, Bishop: 5, Rook: 5, King: 0,
+  PromotedPawn: 1, PromotedLance: 1, PromotedKnight: 1, PromotedSilver: 1,
+  Horse: 5, Dragon: 5
+};
+
+const getNyugyokuState = (board, hands, player) => {
+  let score = 0;
+  let piecesInZone = 0;
+  let kingInZone = false;
+  const isZone = (y) => player === 'sente' ? (y <= 2) : (y >= 6);
+
+  for (let y = 0; y < 9; y++) {
+    for (let x = 0; x < 9; x++) {
+      const p = board[y][x];
+      if (p && p.owner === player) {
+        if (p.type === 'King') {
+          if (isZone(y)) kingInZone = true;
+        } else {
+          // 敵陣にある場合のみカウント
+          if (isZone(y)) {
+            score += PIECE_POINTS_VALS[p.type] || 0;
+            piecesInZone++;
+          }
+        }
+      }
+    }
+  }
+  const hand = hands[player];
+  for (const type in hand) {
+    if (hand[type] > 0) {
+      score += hand[type] * (PIECE_POINTS_VALS[type] || 0);
+    }
+  }
+  const requiredScore = player === 'sente' ? 28 : 27;
+  const canDeclare = kingInZone && piecesInZone >= 10 && score >= requiredScore;
+  return { score, piecesInZone, kingInZone, canDeclare, requiredScore };
+};
+
 module.exports = {
   createInitialBoard,
   isValidMove,
   applyMove,
   generateSFEN,
   isKingInCheck,
-  isCheckmate, // ★export
+  isCheckmate,
+  getNyugyokuState, // ★追加
   EMPTY_HAND
 };
