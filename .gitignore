@@ -2,3 +2,10 @@
 shogi.db
 .env
 dist/
+
+# Security & Local DB
+.env
+node_modules
+shogi.db
+shogi.db-wal
+shogi.db-shm
